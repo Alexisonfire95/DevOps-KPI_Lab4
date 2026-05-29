@@ -9,3 +9,6 @@
 *.pdf
 *.txt
 /terraform.exe
+/.terraform/
+*.tfstate*
+*.iso
