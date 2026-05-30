@@ -1,0 +1,8 @@
+# Шлях до образу Vagrant box (може бути локальним шляхом або URL-адресою)
+box_url = "../bento-amd64.box"
+
+# Назва інтерфейсу Host-Only мережі у VirtualBox
+host_interface = "VirtualBox Host-Only Ethernet Adapter"
+
+# Абсолютний шлях до вашого публічного SSH-ключа для імпорту в користувача ansible
+ssh_public_key_path = "C:/Users/vinim/.ssh/id_ed25519.pub"

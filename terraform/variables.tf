@@ -1,7 +1,7 @@
 variable "box_url" {
   type        = string
   description = "URL of the Vagrant box image to use"
-  default     = "./bento-amd64.box"
+  default     = "../bento-amd64.box"
 }
 
 
