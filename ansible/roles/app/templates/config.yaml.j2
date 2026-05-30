@@ -1,0 +1,9 @@
+server:
+  host: "127.0.0.1"
+  port: 5200
+database:
+  host: "{{ hostvars['db']['ansible_host'] }}"
+  port: 5432
+  user: "mywebapp"
+  password: "dbpassword"
+  name: "mywebapp"

@@ -1,0 +1,150 @@
+---
+- name: Remove system Node.js and npm if present
+  apt:
+    name:
+      - nodejs
+      - npm
+    state: absent
+    purge: yes
+
+- name: Ensure /etc/apt/keyrings exists
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Install NodeSource GPG key
+  get_url:
+    url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+    dest: /etc/apt/keyrings/nodesource.asc
+    mode: '0644'
+
+- name: Add NodeSource Debian repository for Node.js 22
+  apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_22.x nodistro main"
+    state: present
+    filename: nodesource
+
+- name: Install Node.js 22
+  apt:
+    name: nodejs
+    state: present
+    update_cache: yes
+
+- name: Install pnpm globally
+  npm:
+    name: pnpm
+    global: yes
+    state: present
+
+- name: Create app system user
+  user:
+    name: app
+    shell: /usr/sbin/nologin
+    system: yes
+    create_home: no
+    state: present
+
+- name: Create operator user
+  user:
+    name: operator
+    shell: /bin/bash
+    password: "$6$noHqtnICXi1nDbn9$OhHxiXZHJ3EfNjlPxbuKiwr1MjfYsVIzzyS9NoBtnkE3J8WKMVWewpKAeQbHudLRO.pkNCsL4COAVdKCUs9I70"
+    state: present
+
+- name: Configure sudoers for operator user
+  copy:
+    content: |
+      operator ALL=(ALL) NOPASSWD: /usr/bin/systemctl start mywebapp, /usr/bin/systemctl stop mywebapp, /usr/bin/systemctl restart mywebapp, /usr/bin/systemctl status mywebapp, /usr/bin/systemctl reload nginx
+    dest: /etc/sudoers.d/operator
+    mode: '0440'
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Create app directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: app
+    group: app
+    mode: '0755'
+  loop:
+    - /opt/mywebapp
+    - /etc/mywebapp
+
+- name: Copy package.json and lockfile
+  copy:
+    src: "{{ item }}"
+    dest: /opt/mywebapp/
+    owner: app
+    group: app
+    mode: '0644'
+  loop:
+    - "{{ playbook_dir }}/../package.json"
+    - "{{ playbook_dir }}/../pnpm-lock.yaml"
+  notify: restart mywebapp
+
+- name: Copy application source code
+  copy:
+    src: "{{ playbook_dir }}/../src"
+    dest: /opt/mywebapp/
+    owner: app
+    group: app
+    mode: '0755'
+  notify: restart mywebapp
+
+- name: Template config.yaml
+  template:
+    src: config.yaml.j2
+    dest: /etc/mywebapp/config.yaml
+    owner: app
+    group: app
+    mode: '0600'
+  notify: restart mywebapp
+
+- name: Install npm dependencies using pnpm
+  command: pnpm install --prod --frozen-lockfile
+  args:
+    chdir: /opt/mywebapp
+  become: true
+  become_user: app
+  environment:
+    HOME: /tmp
+  changed_when: false
+
+- name: Run database migrations
+  command: pnpm run migrate
+  args:
+    chdir: /opt/mywebapp
+  become: true
+  become_user: app
+  environment:
+    HOME: /tmp
+  changed_when: false
+
+- name: Create systemd service unit for mywebapp
+  copy:
+    dest: /etc/systemd/system/mywebapp.service
+    content: |
+      [Unit]
+      Description=My Web App (Node.js)
+      After=network.target
+
+      [Service]
+      WorkingDirectory=/opt/mywebapp
+      ExecStart=/usr/bin/node src/index.js
+      Restart=always
+      RestartSec=10
+      User=app
+      Environment=NODE_ENV=production
+      Environment=PORT=5200
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0644'
+  notify: restart mywebapp
+
+- name: Ensure mywebapp is enabled and running
+  systemd:
+    name: mywebapp
+    state: started
+    enabled: yes
