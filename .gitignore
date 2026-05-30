@@ -13,3 +13,7 @@
 *.tfstate*
 *.iso
 *.box
+/ansible/inventory.ini
+/*.png
+/metadata*.json
+/ubuntu-box/
