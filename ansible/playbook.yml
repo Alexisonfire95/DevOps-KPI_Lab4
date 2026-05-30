@@ -1,0 +1,19 @@
+---
+- name: Configure all nodes
+  hosts: all
+  become: true
+  roles:
+    - common
+
+- name: Configure database node
+  hosts: db
+  become: true
+  roles:
+    - db
+
+- name: Configure worker node
+  hosts: workers
+  become: true
+  roles:
+    - app
+    - nginx

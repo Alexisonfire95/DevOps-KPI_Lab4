@@ -1,0 +1,58 @@
+---
+- name: Install PostgreSQL and dependencies
+  apt:
+    name:
+      - postgresql
+      - postgresql-contrib
+      - python3-psycopg2
+    state: present
+
+- name: Find installed PostgreSQL version
+  find:
+    paths: /etc/postgresql
+    file_type: directory
+  register: pg_dir
+
+- name: Set PostgreSQL version fact
+  set_fact:
+    pg_version: "{{ pg_dir.files[0].path | basename }}"
+
+- name: Configure PostgreSQL to listen on all interfaces
+  lineinfile:
+    path: "/etc/postgresql/{{ pg_version }}/main/postgresql.conf"
+    regexp: "^#?listen_addresses\\s*="
+    line: "listen_addresses = '*'"
+  notify: restart postgresql
+
+- name: Allow PostgreSQL connections from worker VM
+  lineinfile:
+    path: "/etc/postgresql/{{ pg_version }}/main/pg_hba.conf"
+    line: "host all all {{ hostvars['worker']['ansible_host'] }}/32 md5"
+  notify: restart postgresql
+
+- name: Ensure PostgreSQL is running and enabled
+  systemd:
+    name: postgresql
+    state: started
+    enabled: yes
+
+- name: Create database user
+  postgresql_user:
+    name: mywebapp
+    password: dbpassword
+    state: present
+  become_user: postgres
+
+- name: Create database
+  postgresql_db:
+    name: mywebapp
+    owner: mywebapp
+    state: present
+  become_user: postgres
+
+- name: Allow PostgreSQL access ONLY from worker VM
+  community.general.ufw:
+    rule: allow
+    port: '5432'
+    proto: tcp
+    src: "{{ hostvars['worker']['ansible_host'] }}"

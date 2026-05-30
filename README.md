@@ -1,184 +1,155 @@
-# Task Tracker (mywebapp)
+# Лабораторна робота №4: Infrastructure as Code (IaC: Terraform + Ansible)
 
-Лабораторна робота №1: розгортання web-сервісу з автоматизацією (DevOps KPI).
+Цей проєкт присвячений автоматизації розгортання багатовузлової інфраструктури за допомогою **Terraform** (провайдер VirtualBox) та конфігуруванню системи за допомогою **Ansible**.
 
-## Варіант (N = 1)
+---
 
-- **N** — порядковий номер у списку групи: **1**
-- **V2** = (N % 2) + 1 = **2** → конфігурація: файл `/etc/mywebapp/config.yaml`; БД: **PostgreSQL**
-- **V3** = (N % 3) + 1 = **2** → застосунок: **Task Tracker**
-- **V5** = (N % 5) + 1 = **2** → порт застосунку: **5200**
+## Варіант індивідуального завдання (N = 1)
 
-### Мережа
+*   **N** — порядковий номер у списку: **1**
+*   **Конфігурація (V2 = 2)**: Шлях до файлу конфігурації: `/etc/mywebapp/config.yaml`; СУБД: **PostgreSQL**
+*   **Застосунок (V3 = 2)**: **Task Tracker** (сервіс відстеження задач)
+*   **Порт застосунку (V5 = 2)**: **5200**
 
-| Компонент | Адреса | Порт |
-|-----------|--------|------|
-| nginx | 0.0.0.0 | 80 |
-| mywebapp | 127.0.0.1 | 5200 |
-| PostgreSQL | 127.0.0.1 | 5432 |
+---
 
-## Веб-застосунок
+## 1. Схема інфраструктури та мережі
 
-Task Tracker — сервіс для відстеження задач.
+Інфраструктура складається з двох віртуальних машин, розгорнутих в ізольованій Host-Only мережі VirtualBox (`192.168.56.0/24`) з додатковим підключенням NAT для доступу до інтернету:
 
-- Поля задачі: `id`, `title`, `status`, `created_at`
-- `GET /tasks` — список усіх задач
-- `POST /tasks` (`{ "title": "..." }`) — створити задачу
-- `POST /tasks/:id/done` — статус «виконано»
-- `GET /health/alive` — завжди `200 OK`
-- `GET /health/ready` — `200 OK`, якщо БД доступна; інакше `500`
-- `GET /` — лише `text/html`, список ендпоінтів бізнес-логіки
-
-API віддає `application/json` або `text/html` за заголовком `Accept` (простий HTML без JS/CSS).
-
-## Стек
-
-- Node.js 24 LTS, pnpm
-- PostgreSQL
-- nginx, systemd (socket activation)
-
-### Локальна розробка
-
-```bash
-pnpm install
-cp deploy/config.example.yaml config.local.yaml
-pnpm run migrate -- --config config.local.yaml
-pnpm start -- --config config.local.yaml
+```
+                       +----------------- VM1: worker -----------------+
+                       | IP: 192.168.56.115                            |
+                       | - Nginx (порт 80, публічний)                  |
+                       | - Node.js App (порт 5200, тільки localhost)   |
+                       +-----------------------------------------------+
+                                              |
+                                              | (підключення до БД)
+                                              v
+                       +------------------- VM2: db -------------------+
+                       | IP: 192.168.56.116                            |
+                       | - PostgreSQL (порт 5432, закритий ззовні)     |
+                       +-----------------------------------------------+
 ```
 
-### API
+### Мережеві обмеження:
+*   **Nginx (порт 80)**: Відкритий для будь-яких зовнішніх клієнтів на `worker` VM. Працює як зворотний проксі (reverse proxy), перенаправляючи трафік на локальний Node.js застосунок (`127.0.0.1:5200`).
+*   **Web App (порт 5200)**: Запущений локально на `127.0.0.1`. Прямий доступ ззовні заблокований.
+*   **PostgreSQL (порт 5432)**: Працює на `db` VM. Доступ дозволено **виключно** для `worker` VM (`192.168.56.115`) та локально. Прямий доступ з хост-машини заблоковано на рівні брандмауера (`UFW`) та конфігурації бази даних (`pg_hba.conf`).
+
+---
+
+## 2. Користувачі та права доступу
+
+У системі автоматично налаштовуються такі користувачі:
+
+| Користувач | Призначення | Права | Спосіб створення та автентифікація |
+| :--- | :--- | :--- | :--- |
+| **`ansible`** | Автоматичне налаштування (на всіх ВМ) | Адміністративні права, passwordless `sudo` | Створюється через **cloud-init**, вхід по SSH-ключу |
+| **`teacher`** | Перевірка роботи (на всіх ВМ) | Адміністративні права, `sudo` з паролем | Створюється через **Ansible**, пароль: `12345678` |
+| **`app`** | Запуск застосунку (тільки на `worker`) | Мінімально необхідні (системний користувач без shell) | Створюється через **Ansible**, не має доступу по SSH |
+| **`operator`**| Керування сервісами (тільки на `worker`) | Пароль для SSH, обмежений passwordless `sudo` | Створюється через **Ansible**, пароль: `12345678` |
+
+### Обмеження для користувача `operator`:
+Користувачу `operator` через конфігурацію `/etc/sudoers.d/operator` дозволяється виконувати без введення пароля **лише такі команди**:
+*   `sudo systemctl start mywebapp`
+*   `sudo systemctl stop mywebapp`
+*   `sudo systemctl restart mywebapp`
+*   `sudo systemctl status mywebapp`
+*   `sudo systemctl reload nginx`
+
+---
+
+## 3. Опис API застосунку
+
+Застосунок віддає `application/json` або `text/html` (залежно від заголовка `Accept`).
 
 | Метод | Шлях | Опис |
-|-------|------|------|
-| GET | / | Список ендпоінтів (text/html) |
-| GET | /tasks | Список задач |
-| POST | /tasks | Створити задачу `{ "title": "..." }` |
-| POST | /tasks/:id/done | Відмітити задачу виконаною |
-| GET | /health/alive | Стан процесу (не публікується через nginx) |
-| GET | /health/ready | Готовність (БД) (не публікується через nginx) |
+| :--- | :--- | :--- |
+| **GET** | `/` | Головна сторінка зі списком ендпоінтів бізнес-логіки |
+| **GET** | `/tasks` | Отримання списку задач |
+| **POST**| `/tasks` | Створення нової задачі (тіло запиту: `{ "title": "назва" }`) |
+| **POST**| `/tasks/:id/done` | Позначення задачі виконаною |
+| **GET** | `/health/alive` | Перевірка працездатності сервісу (заблоковано в Nginx) |
+| **GET** | `/health/ready` | Перевірка підключення застосунку до бази даних (заблоковано в Nginx) |
 
-## Розгортання на ВМ
+---
 
-### Базовий образ та ресурси
+## 4. Інструкція із запуску розгортання
 
-- Образ: Ubuntu 22.04 LTS — `ubuntu/jammy64`
-- Ресурси: 1 CPU, 1024 MB RAM
-- Конфігурація застосунку: `/etc/mywebapp/config.yaml`
+Розгортання складається з двох послідовних етапів: **Provisioning** (підготовка інфраструктури) та **Configuration Management** (налаштування конфігурації).
 
-### Вхід на ВМ
+### Попередні вимоги
+*   Встановлений VirtualBox на хост-машині Windows (шлях `C:\Program Files\Oracle\VirtualBox` має бути доданий до `PATH`).
+*   Встановлені Terraform (на хості Windows) та Ansible (всередині WSL2 Ubuntu).
+*   Приватний SSH-ключ у WSL2 за шляхом `~/.ssh/vagrant_id_rsa` для авторизації Ansible.
 
-- `vagrant up`, потім `vagrant ssh`
-- Користувачі: `student`, `teacher`, `operator` — пароль `12345678` (зміна при першому вході)
-- Користувач `vagrant` після provision заблокований
-- Сервіс: системний користувач `mywebapp`
+---
 
-### Запуск автоматизації
+### Етап А: Provisioning (Terraform на хост-системі Windows)
 
-```bash
-vagrant up
-```
+1.  Перейдіть до каталогу `terraform/`:
+    ```bash
+    cd terraform
+    ```
+2.  Згенеруйте файли `seed` ISO-образів для `cloud-init` (вони містять метадані та ваш SSH-ключ для користувача `ansible`):
+    ```bash
+    python make_cidata.py --hostname worker --pubkey-file ~/.ssh/vagrant_id_rsa.pub --output seed-worker.iso
+    python make_cidata.py --hostname db --pubkey-file ~/.ssh/vagrant_id_rsa.pub --output seed-db.iso
+    ```
+    *(Примітка: Утиліта використовує бібліотеку `pycdlib` для генерації ISO-образів безпосередньо з Python).*
+3.  Ініціалізуйте провайдери та застосуйте конфігурацію:
+    ```bash
+    terraform init
+    terraform apply -auto-approve
+    ```
+    *Після завершення Terraform автоматично створить віртуальні машини у VirtualBox та згенерує файл динамічного інвентаря `ansible/inventory.ini` на рівень вище.*
 
-Provision (`scripts/provision.sh`): пакети, користувачі, PostgreSQL, копія застосунку в `/opt/mywebapp`, `config.yaml`, systemd socket activation, nginx, `/home/student/gradebook`.
+---
 
-Після provision: http://localhost:8080 (порт 80 гостя проброшений на 8080 хоста).
+### Етап Б: Configuration Management (Ansible у WSL2)
 
-### Тестування
+1.  Увійдіть до середовища WSL2 (Ubuntu).
+2.  Перейдіть до кореневого каталогу проєкту.
+3.  Запустіть Ansible Playbook для налаштування системи та розгортання застосунку:
+    ```bash
+    ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
+    ```
+    *Ansible ідемпотентно встановить Node.js 22, pnpm, PostgreSQL, Nginx, налаштує конфігураційні файли з шаблонів Jinja2, виконає міграції бази даних, налаштує правила брандмауера UFW, створить користувачів та запустить системний сервіс.*
 
-З хоста:
+---
 
-```bash
-curl http://localhost:8080/
-curl http://localhost:8080/tasks
-curl -X POST http://localhost:8080/tasks -H "Content-Type: application/json" -d "{\"title\":\"Test\"}"
-```
+## 5. Верифікація роботи та безпеки
 
-Health зсередини ВМ:
+Після завершення розгортання можна виконати наступні перевірки:
 
-```bash
-vagrant ssh
-curl http://127.0.0.1:5200/health/alive
-curl http://127.0.0.1:5200/health/ready
-```
+1.  **Доступність застосунку через Nginx (з хост-машини):**
+    ```bash
+    curl http://192.168.56.115/tasks
+    ```
+    *Має повернути статус 200 та список задач у форматі JSON.*
 
-Користувач `operator`:
+2.  **Блокування `/health` шляхів через Nginx:**
+    ```bash
+    curl -I http://192.168.56.115/health/alive
+    ```
+    *Має повернути статус `404 Not Found` (оскільки Nginx блокує зовнішній доступ).*
 
-```bash
-sudo systemctl status mywebapp
-sudo systemctl restart mywebapp
-sudo systemctl reload nginx
-```
+3.  **Перевірка захисту бази даних (порт 5432):**
+    *Спроба з'єднання з хост-машини:*
+    ```bash
+    nc -z -v -w3 192.168.56.116 5432
+    ```
+    *Має завершитися таймаутом (порт закрито UFW).*
+    *Перевірка з'єднання з `worker` VM:*
+    ```bash
+    nc -z -v -w3 192.168.56.116 5432
+    ```
+    *Має повернути успішне підключення.*
 
-## Docker Compose (ЛР2)
-
-Для контейнеризації та локального запуску застосунку у зв'язці з базою даних **PostgreSQL** та проксі-сервером **Nginx** використовується **Docker Compose**.
-
-### Мережа та архітектура в Docker
-
-Усі три сервіси запускаються в ізольованій мережі типу bridge під назвою `mywebapp-net`:
-- **db** (`postgres:17-alpine`): База даних. Доступна за внутрішнім іменем хоста `db:5432`. Дані зберігаються у persistent volume `mywebapp-db-data`. Реалізовано healthcheck за допомогою `pg_isready`.
-- **web** (Node.js застосунок на базі `node:24-alpine`): Веб-сервер, що працює на порту `5200`. Перед запуском застосунку скрипт `scripts/docker-entrypoint.sh` автоматично генерує `/etc/mywebapp/config.yaml`, очікує готовності БД та накочує міграції. Реалізовано healthcheck через `wget` на `/health/alive`.
-- **nginx** (`nginx:1.27-alpine`): Зворотний проксі (reverse proxy), що приймає зовнішні запити на порту `8080` та перенаправляє їх на сервіс `web:5200`. Доступ до `/health` та `/health/` ззовні заблоковано.
-
-### Запуск додатку
-
-1. Переконайтеся, що Docker Daemon запущено на вашому комп'ютері.
-2. Запустіть усі сервіси командою:
-   ```bash
-   docker compose up -d --build
-   ```
-3. Переглянути статус контейнерів та їхнє здоров'я (healthcheck):
-   ```bash
-   docker compose ps
-   ```
-4. Перегляд логів окремого сервісу або всього стеку:
-   ```bash
-   docker compose logs -f web
-   ```
-
-### Тестування API через Nginx
-
-Перевірити роботу застосунку з хоста можна аналогічно до ЛР1, але через порт **8080**:
-
-```bash
-# Перевірка головної сторінки (вимагає Accept: text/html)
-curl.exe -i -H "Accept: text/html" http://localhost:8080/
-
-# Отримання списку задач
-curl.exe -i http://localhost:8080/tasks
-
-# Створення нової задачі (приклад для Windows PowerShell з екрануванням або через файл)
-# Запишіть JSON у файл task.json: {"title": "Test Task"}
-# Тоді виконайте:
-curl.exe -i -X POST -H "Content-Type: application/json" -d "@task.json" http://localhost:8080/tasks
-```
-
-### Перевірка безпеки (блокування health-ендпоінтів)
-
-Nginx блокує зовнішні запити до `/health/alive` та `/health/ready` (повертає 404):
-```bash
-curl.exe -i http://localhost:8080/health/alive
-```
-
-### Перевірка персистентності бази даних
-
-Створіть задачу, після чого зупиніть та видаліть контейнери:
-```bash
-docker compose down
-```
-Запустіть їх знову:
-```bash
-docker compose up -d
-```
-Створені задачі мають зберегтися, оскільки дані PostgreSQL знаходяться у named volume `mywebapp-db-data`.
-
-### Зупинка та очищення
-
-Щоб зупинити та видалити всі контейнери та створену мережу:
-```bash
-docker compose down
-```
-Щоб видалити також persistent volume з даними бази:
-```bash
-docker compose down -v
-```
-
+4.  **Перевірка файлу оцінок:**
+    *Файл `/home/student/gradebook` на обох ВМ містить номер варіанту:*
+    ```bash
+    cat /home/student/gradebook
+    # Виведе: 1
+    ```
