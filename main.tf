@@ -16,8 +16,8 @@ terraform {
 }
 
 provider "virtualbox" {
-  delay      = 60
-  mintimeout = 5
+  delay      = 180
+  mintimeout = 20
 }
 
 resource "null_resource" "generate_worker_iso" {
@@ -48,13 +48,21 @@ resource "virtualbox_vm" "worker" {
   optical_disks = ["${path.module}/seed-worker.iso"]
 
   network_adapter {
-    type = "nat"
-  }
-
-  network_adapter {
     type           = "hostonly"
     device         = "IntelPro1000MTDesktop"
     host_interface = var.host_interface
+  }
+
+  provisioner "local-exec" {
+    command     = <<EOT
+      $env:Path += ";C:\Program Files\Oracle\VirtualBox"
+      VBoxManage controlvm ${self.name} poweroff
+      Start-Sleep -Seconds 5
+      VBoxManage modifyvm ${self.name} --nic2 nat --nictype2 82540EM
+      VBoxManage startvm ${self.name} --type headless
+      Start-Sleep -Seconds 10
+    EOT
+    interpreter = ["powershell", "-Command"]
   }
 
   depends_on = [
@@ -70,13 +78,21 @@ resource "virtualbox_vm" "db" {
   optical_disks = ["${path.module}/seed-db.iso"]
 
   network_adapter {
-    type = "nat"
-  }
-
-  network_adapter {
     type           = "hostonly"
     device         = "IntelPro1000MTDesktop"
     host_interface = var.host_interface
+  }
+
+  provisioner "local-exec" {
+    command     = <<EOT
+      $env:Path += ";C:\Program Files\Oracle\VirtualBox"
+      VBoxManage controlvm ${self.name} poweroff
+      Start-Sleep -Seconds 5
+      VBoxManage modifyvm ${self.name} --nic2 nat --nictype2 82540EM
+      VBoxManage startvm ${self.name} --type headless
+      Start-Sleep -Seconds 10
+    EOT
+    interpreter = ["powershell", "-Command"]
   }
 
   depends_on = [
@@ -88,9 +104,11 @@ resource "local_file" "ansible_inventory" {
   filename = "${path.module}/ansible/inventory.ini"
   content  = <<EOT
 [workers]
-worker ansible_host=${virtualbox_vm.worker.network_adapter[1].ipv4_address} ansible_user=ansible
+worker ansible_host=${virtualbox_vm.worker.network_adapter[0].ipv4_address} ansible_user=vagrant ansible_ssh_private_key_file=~/.ssh/vagrant_id_rsa
 
 [db]
-db ansible_host=${virtualbox_vm.db.network_adapter[1].ipv4_address} ansible_user=ansible
+db ansible_host=${virtualbox_vm.db.network_adapter[0].ipv4_address} ansible_user=vagrant ansible_ssh_private_key_file=~/.ssh/vagrant_id_rsa
 EOT
 }
+
+

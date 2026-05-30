@@ -1,8 +1,15 @@
 variable "box_url" {
   type        = string
   description = "URL of the Vagrant box image to use"
-  default     = "https://app.vagrantup.com/ubuntu/boxes/jammy64/versions/20241002.0.0/providers/virtualbox.box"
+  default     = "./bento-amd64.box"
 }
+
+
+
+
+
+
+
 
 variable "host_interface" {
   type        = string

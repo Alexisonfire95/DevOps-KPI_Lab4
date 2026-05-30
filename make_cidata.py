@@ -68,6 +68,23 @@ local-hostname: {args.hostname}
             joliet_path='/meta-data'
         )
 
+        # Add network-config
+        network_data = """version: 2
+ethernets:
+  enp0s3:
+    dhcp4: true
+  enp0s8:
+    dhcp4: true
+"""
+        nc_bytes = network_data.encode('utf-8')
+        iso.add_fp(
+            BytesIO(nc_bytes),
+            len(nc_bytes),
+            '/NET_CONF.;1',
+            rr_name='network-config',
+            joliet_path='/network-config'
+        )
+
         iso.write(args.output)
         iso.close()
         print(f"Successfully generated {args.output}")
