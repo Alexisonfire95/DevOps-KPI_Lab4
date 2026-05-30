@@ -1,0 +1,129 @@
+---
+- name: Configure NAT interface (eth1) in Netplan
+  copy:
+    dest: /etc/netplan/02-nat.yaml
+    content: |
+      network:
+        version: 2
+        ethernets:
+          eth1:
+            dhcp4: true
+    owner: root
+    group: root
+    mode: '0644'
+  register: netplan_nat
+
+- name: Apply Netplan configuration
+  command: netplan apply
+  when: netplan_nat.changed
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+
+- name: Install base packages
+  apt:
+    name:
+      - curl
+      - git
+      - ufw
+      - tar
+      - unzip
+      - acl
+    state: present
+
+- name: Ensure student group exists
+  group:
+    name: student
+    state: present
+
+- name: Create student home directory
+  file:
+    path: /home/student
+    state: directory
+    owner: root
+    group: student
+    mode: '0755'
+
+- name: Create gradebook file
+  copy:
+    content: "1\n"
+    dest: /home/student/gradebook
+    owner: root
+    group: student
+    mode: '0644'
+
+- name: Create ansible user
+  user:
+    name: ansible
+    groups: sudo
+    append: yes
+    shell: /bin/bash
+    state: present
+
+- name: Set up authorized_keys for ansible user
+  authorized_key:
+    user: ansible
+    state: present
+    key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID10nsB5sNdN+V/JsMfXljTxdIOVuEpRF1QjSWkuDtIn vini.marmone@gmail.com"
+
+- name: Configure passwordless sudo for ansible user
+  copy:
+    content: "ansible ALL=(ALL) NOPASSWD:ALL"
+    dest: /etc/sudoers.d/ansible
+    mode: '0440'
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Ensure teacher group exists
+  group:
+    name: teacher
+
+    state: present
+
+- name: Create teacher user
+  user:
+    name: teacher
+    password: "$6$noHqtnICXi1nDbn9$OhHxiXZHJ3EfNjlPxbuKiwr1MjfYsVIzzyS9NoBtnkE3J8WKMVWewpKAeQbHudLRO.pkNCsL4COAVdKCUs9I70"
+    groups: sudo
+    append: yes
+    shell: /bin/bash
+    state: present
+
+- name: Configure teacher sudo with password
+  copy:
+    content: "teacher ALL=(ALL:ALL) ALL"
+    dest: /etc/sudoers.d/teacher
+    mode: '0440'
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Allow SSH password authentication for teacher and operator
+  copy:
+    dest: /etc/ssh/sshd_config.d/99-password-auth.conf
+    content: |
+      Match User teacher,operator
+          PasswordAuthentication yes
+    owner: root
+    group: root
+    mode: '0644'
+  register: ssh_config_custom
+
+- name: Restart SSH service if config changed
+  systemd:
+    name: ssh
+    state: restarted
+  when: ssh_config_custom.changed
+
+- name: Allow SSH connections through UFW
+  community.general.ufw:
+    rule: allow
+    port: '22'
+    proto: tcp
+
+- name: Enable UFW with default deny policy
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+
