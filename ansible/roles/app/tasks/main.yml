@@ -79,13 +79,13 @@
     group: app
     mode: '0644'
   loop:
-    - "{{ playbook_dir }}/../package.json"
-    - "{{ playbook_dir }}/../pnpm-lock.yaml"
+    - "{{ playbook_dir }}/../mywebapp/package.json"
+    - "{{ playbook_dir }}/../mywebapp/pnpm-lock.yaml"
   notify: restart mywebapp
 
 - name: Copy application source code
   copy:
-    src: "{{ playbook_dir }}/../src"
+    src: "{{ playbook_dir }}/../mywebapp/src"
     dest: /opt/mywebapp/
     owner: app
     group: app

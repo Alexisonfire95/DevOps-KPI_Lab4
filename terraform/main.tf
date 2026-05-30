@@ -101,7 +101,7 @@ resource "virtualbox_vm" "db" {
 }
 
 resource "local_file" "ansible_inventory" {
-  filename = "${path.module}/ansible/inventory.ini"
+  filename = "${path.module}/../ansible/inventory.ini"
   content  = <<EOT
 [workers]
 worker ansible_host=${virtualbox_vm.worker.network_adapter[0].ipv4_address} ansible_user=vagrant ansible_ssh_private_key_file=~/.ssh/vagrant_id_rsa

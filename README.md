@@ -234,12 +234,16 @@ docker compose down -v
 
 #### Етап А: Provisioning (Terraform на хост-системі Windows)
 
-1.  Генеруємо ISO-образи ініціалізації `cloud-init` (вони містять метадані та SSH-ключ для користувача `ansible`):
+1.  Перейдіть до каталогу `terraform/`:
+    ```bash
+    cd terraform
+    ```
+2.  Генеруємо ISO-образи ініціалізації `cloud-init` (вони містять метадані та SSH-ключ для користувача `ansible`):
     ```bash
     python make_cidata.py
     ```
-2.  Переконайтеся, що шлях до VirtualBox доданий до змінних оточення (наприклад, `C:\Program Files\Oracle\VirtualBox` для Windows).
-3.  Ініціалізуйте та застосуйте Terraform-маніфест:
+3.  Переконайтеся, що шлях до VirtualBox доданий до змінних оточення (наприклад, `C:\Program Files\Oracle\VirtualBox` для Windows).
+4.  Ініціалізуйте та застосуйте Terraform-маніфест:
     ```bash
     terraform init
     terraform apply -auto-approve
