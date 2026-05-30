@@ -19,7 +19,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    location ^~ /health/ {
+    location /health {
         return 404;
     }
 }

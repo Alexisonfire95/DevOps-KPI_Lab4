@@ -69,6 +69,19 @@
     state: present
     key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID10nsB5sNdN+V/JsMfXljTxdIOVuEpRF1QjSWkuDtIn vini.marmone@gmail.com"
 
+- name: Read vagrant authorized_keys if present
+  slurp:
+    src: /home/vagrant/.ssh/authorized_keys
+  register: vagrant_keys
+  ignore_errors: yes
+
+- name: Set up vagrant keys for ansible user
+  authorized_key:
+    user: ansible
+    state: present
+    key: "{{ vagrant_keys.content | b64decode }}"
+  when: vagrant_keys is succeeded
+
 - name: Configure passwordless sudo for ansible user
   copy:
     content: "ansible ALL=(ALL) NOPASSWD:ALL"
